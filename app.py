@@ -91,7 +91,7 @@ with tab1:
                         else:
                             st.error("詳細データの取得に失敗しました。")
                     else:
-                        st.warning("店舗が見つかりませんでした。")
+                        st.warning(f"店舗が見つかりませんでした。（Googleの応答: {search_res.get('status')}）")
                 except Exception as e:
                     st.error(f"エラーが発生しました: {e}")
 
@@ -147,26 +147,29 @@ with tab2:
                     seo_params = {"engine": "google", "q": target_keyword, "hl": "ja", "gl": "jp", "google_domain": "google.co.jp", "location": selected_loc_en, "num": 100, "api_key": serpapi_key}
                     seo_res = requests.get("https://serpapi.com/search.json", params=seo_params).json()
                     
-                    seo_rank = "圏外"
-                    for res in seo_res.get("organic_results", []):
-                        if clean_target_url in res.get("link", ""):
-                            seo_rank = f"{res['position']} 位"
-                            break
+                    if "error" in seo_res:
+                        st.error(f"SerpApiエラー: {seo_res['error']}")
+                    else:
+                        seo_rank = "圏外"
+                        for res in seo_res.get("organic_results", []):
+                            if clean_target_url in res.get("link", ""):
+                                seo_rank = f"{res['position']} 位"
+                                break
 
-                    # MEO
-                    meo_params = {"engine": "google_local", "q": target_keyword, "hl": "ja", "gl": "jp", "google_domain": "google.co.jp", "location": selected_loc_en, "api_key": serpapi_key}
-                    meo_res = requests.get("https://serpapi.com/search.json", params=meo_params).json()
-                    
-                    meo_rank = "圏外"
-                    for i, res in enumerate(meo_res.get("local_results", [])):
-                        if target_name in res.get("title", ""):
-                            meo_rank = f"{i + 1} 位"
-                            break
-                    
-                    st.success("✅ 順位の調査が完了しました！")
-                    res_col1, res_col2 = st.columns(2)
-                    with res_col1: st.container(border=True).metric("🌐 ウェブ検索（SEO順位）", seo_rank)
-                    with res_col2: st.container(border=True).metric("🗺️ Googleマップ検索（MEO順位）", meo_rank)
+                        # MEO
+                        meo_params = {"engine": "google_local", "q": target_keyword, "hl": "ja", "gl": "jp", "google_domain": "google.co.jp", "location": selected_loc_en, "api_key": serpapi_key}
+                        meo_res = requests.get("https://serpapi.com/search.json", params=meo_params).json()
+                        
+                        meo_rank = "圏外"
+                        for i, res in enumerate(meo_res.get("local_results", [])):
+                            if target_name in res.get("title", ""):
+                                meo_rank = f"{i + 1} 位"
+                                break
+                        
+                        st.success("✅ 順位の調査が完了しました！")
+                        res_col1, res_col2 = st.columns(2)
+                        with res_col1: st.container(border=True).metric("🌐 ウェブ検索（SEO順位）", seo_rank)
+                        with res_col2: st.container(border=True).metric("🗺️ Googleマップ検索（MEO順位）", meo_rank)
 
                 except Exception as e:
                     st.error(f"順位の取得中にエラーが発生しました: {e}")
