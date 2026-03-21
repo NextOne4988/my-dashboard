@@ -12,20 +12,20 @@ st.set_page_config(page_title="自社専用 総合ダッシュボード", layout
 
 st.title("🚀 広島パソコンサポートサービス 専用ダッシュボード")
 
-# --- 🗝️ APIキーの自動読み込み ---
-default_google_key = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else ""
-default_openai_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else ""
-default_serpapi_key = st.secrets["SERPAPI_KEY"] if "SERPAPI_KEY" in st.secrets else ""
+# --- 🗝️ 見えない金庫（Secrets）からの自動読み込み ---
+default_google_key = st.secrets.get("GOOGLE_API_KEY", "")
+default_openai_key = st.secrets.get("OPENAI_API_KEY", "")
+default_serpapi_key = st.secrets.get("SERPAPI_KEY", "")
+default_ga4_id = st.secrets.get("GA4_PROPERTY_ID", "")
 
-# サイドバー設定
-with st.sidebar.expander("⚙️ 各種設定・APIキー（JSONキーのアップロード）", expanded=True):
+# サイドバー設定（金庫にキーがあれば自動入力されます）
+with st.sidebar.expander("⚙️ 各種設定・APIキー（※金庫設定済みなら入力不要です！）", expanded=False):
     google_api_key = st.text_input("Google APIキー", value=default_google_key, type="password")
     openai_api_key = st.text_input("OpenAI APIキー", value=default_openai_key, type="password")
     serpapi_key = st.text_input("SerpApiキー", value=default_serpapi_key, type="password")
     
     st.divider()
-    st.markdown("**📊 GA4 連携用**")
-    # 🎉 ここで先ほどダウンロードしたJSONファイルをアップロードします！
+    st.markdown("**📊 GA4 連携用（※金庫設定済みならアップロード不要！）**")
     uploaded_json = st.file_uploader("🗝️ 合鍵 (JSONファイル) をアップロード", type=["json"])
 
 # --- 📱 タブ機能で画面を3つに分ける ---
@@ -178,24 +178,36 @@ with tab3:
     st.header("📈 自社サイト アクセスランキング (過去30日間)")
     st.markdown("Googleアナリティクス(GA4)から、どのページがよく見られているかを取得します。")
 
-    ga4_property_id = st.text_input("📊 GA4 プロパティID（数字のみ）", value="")
-    st.caption("※GA4の管理画面 ＞ プロパティの詳細 にある「プロパティ ID」を入力してください。")
+    ga4_property_id = st.text_input("📊 GA4 プロパティID（数字のみ）", value=default_ga4_id)
+    st.caption("※自動読み込み設定済みの場合はそのままボタンを押してください。")
     
     if st.button("🚀 アクセスデータを取得する", type="primary"):
+        credentials = None
+        
+        # 1. 見えない金庫（Secrets）に合鍵があればそれを使う
+        if "GOOGLE_CREDENTIALS" in st.secrets:
+            try:
+                key_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+                credentials = service_account.Credentials.from_service_account_info(key_dict)
+            except Exception as e:
+                st.error("⚠️ 金庫の中の合鍵（JSON）の形式にエラーがあります。コピペミスがないか確認してください。")
+        
+        # 2. 金庫になければ、手動アップロードされた合鍵を使う
+        elif uploaded_json is not None:
+            uploaded_json.seek(0)
+            key_dict = json.load(uploaded_json)
+            credentials = service_account.Credentials.from_service_account_info(key_dict)
+
         if not ga4_property_id:
             st.warning("⚠️ プロパティIDを入力してください！")
-        elif uploaded_json is None:
-            st.error("⚠️ 左のサイドバーから、ダウンロードした「合鍵（JSONファイル）」をアップロードしてください！")
+        elif credentials is None:
+            st.error("⚠️ 合鍵（JSONデータ）が見つかりません。Secrets（金庫）に設定するか、サイドバーからファイルをアップロードしてください。")
         else:
             with st.spinner("ロボットがGA4からアクセスデータを取得しています...⏳"):
                 try:
-                    # 1. JSONファイルを読み込んでロボットを認証する
-                    uploaded_json.seek(0)
-                    key_dict = json.load(uploaded_json)
-                    credentials = service_account.Credentials.from_service_account_info(key_dict)
                     client = BetaAnalyticsDataClient(credentials=credentials)
 
-                    # 2. GA4に「過去30日のページ別PV数を教えて！」とお願いする
+                    # GA4に「過去30日のページ別PV数を教えて！」とお願いする
                     request = RunReportRequest(
                         property=f"properties/{ga4_property_id.strip()}",
                         dimensions=[Dimension(name="pageTitle"), Dimension(name="pagePath")],
@@ -203,10 +215,8 @@ with tab3:
                         date_ranges=[DateRange(start_date="30daysAgo", end_date="today")],
                     )
                     
-                    # 3. データの受け取り
                     response = client.run_report(request)
                     
-                    # 4. データを整理して表（データフレーム）にする
                     data = []
                     total_pv = 0
                     total_users = 0
@@ -226,7 +236,6 @@ with tab3:
                     if data:
                         st.success("✅ データの取得に大成功しました！")
                         
-                        # 全体サマリーをドーンと表示
                         col1, col2 = st.columns(2)
                         col1.metric("👁️ 過去30日の 総PV数", f"{total_pv:,} 回")
                         col2.metric("👥 過去30日の 総ユーザー数", f"{total_users:,} 人")
@@ -234,12 +243,9 @@ with tab3:
                         st.divider()
                         st.subheader("🏆 ページ別 アクセスランキング (トップ10)")
                         
-                        # 表をPV数が多い順（降順）に並べ替えてトップ10を抽出
                         df = pd.DataFrame(data)
                         df_sorted = df.sort_values("PV数 (見られた回数)", ascending=False).head(10)
-                        df_sorted.index = range(1, len(df_sorted) + 1) # 順位を1からにする
-                        
-                        # 表を描画
+                        df_sorted.index = range(1, len(df_sorted) + 1)
                         st.dataframe(df_sorted, use_container_width=True)
                     else:
                         st.info("データがありません（過去30日間にアクセスがないか、設定直後のためデータが反映されていない可能性があります）。")
